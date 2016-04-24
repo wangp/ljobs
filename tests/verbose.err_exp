@@ -1,0 +1,10 @@
+ljobs[0]: start	./echo2 a
+-------- ljobs[0]: ./echo2 a --------
+a
+--------
+ljobs[0]: done	./echo2 a
+ljobs[1]: start	./echo2 b c
+-------- ljobs[1]: ./echo2 b c --------
+b c
+--------
+ljobs[1]: done	./echo2 b c

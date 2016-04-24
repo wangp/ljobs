@@ -1,0 +1,353 @@
+#!/usr/bin/env L
+
+string PROG = "ljobs";
+
+typedef int pid_t;
+
+typedef struct job {
+    int     tasknum;
+    string  showcmd;    /* only for show */
+    FILE    outfile;
+    FILE    errfile;
+} job_t;
+
+typedef job_t{pid_t} jobs_t;
+
+struct {
+    int     maxjobs;
+    int     keepgoing;
+    string  shell;
+    int     verbose;
+    int     dryrun;
+} options = { 0, 0, undef, 0, 0 };
+
+int process_options(string argv[])
+{
+    string  c;
+    string  lopts[] = {"help", "jobs:", "keep-going", "verbose", "dry-run"};
+    int     n;
+
+    while (c = getopt(argv, "hj:kcv", lopts)) {
+        switch (c) {
+            case "h":
+            case "help":
+                usage();
+                exit(255);
+                break;
+            case "j":
+            case "jobs":
+                n = (int)optarg;
+                unless (defined(n) && n > 0) {
+                    mydie("invalid argument for --jobs\n");
+                }
+                options.maxjobs = n;
+                break;
+            case "k":
+            case "keep-going":
+                options.keepgoing = 1;
+                break;
+            case "c":
+                options.shell = getenv("SHELL");
+                unless (defined(options.shell)) {
+                    options.shell = "/bin/sh";
+                }
+                break;
+            case "v":
+            case "verbose":
+                options.verbose = 1;
+                break;
+            case "dry-run":
+                options.dryrun = 1;
+                break;
+            default:
+                if (optopt == "") {
+                    mydie("unrecognised option\n");
+                } else {
+                    mydie("unrecognised option -${optopt} "
+                        "or missing argument\n");
+                }
+                break;
+        }
+    }
+
+    if (options.maxjobs < 1) {
+        options.maxjobs = cpus();
+    }
+
+    return optind;
+}
+
+void usage()
+{
+    puts(
+        "Usage:\n"
+        "  ljobs [OPTIONS...] COMMAND [CMD-ARGS...] ::: TASKS...\n"
+        "  ljobs [OPTIONS...] COMMAND [CMD-ARGS...] < TASKS\n"
+        "\n"
+        "Options:\n"
+        "  -j NUM       number of job slots\n"
+        "  -k           keep going even if a task failed\n"
+        "  -c           run shell command\n"
+        "  -v           verbose output\n"
+        "  --dry-run    print commands but do not run them\n"
+        "\n"
+        "String substitutions in command arguments:\n"
+        "  {}           task\n"
+        "  {.}          task without extension\n"
+        "  {/}          basename of task\n"
+        "  {//}         dirname of task\n"
+        "  {/.}         basename of task without extension\n"
+        "  {#}          task number\n"
+    );
+}
+
+void mydie(string msg)
+{
+    warn(msg);
+    exit(255);
+}
+
+int main(string argv[])
+{
+    string  cmd;
+    string  cmdargs[];
+    string  taskargs[];
+    int     taskstdin = 1;
+    int     errs;
+    int     failedexit;
+    int     i;
+
+    i = process_options(argv);
+    argv = argv[i..END];
+
+    cmd = shift(&argv);
+    if (!defined(cmd) || cmd == ":::") {
+        mydie("no command\n");
+    }
+
+    cmdargs = argv;
+    for (i = 0; i < length(argv); i++) {
+        if (argv[i] == ":::") {
+            cmdargs = argv[0..i-1];
+            taskargs = argv[i+1..END];
+            taskstdin = 0;
+            break;
+        }
+    }
+
+    failedexit = 255;
+    errs = master(cmd, cmdargs, taskstdin, taskargs, &failedexit);
+
+    if (options.keepgoing) {
+        return (errs > 253) ? 254 : errs;
+    } else {
+        return (errs) ? failedexit : 0;
+    }
+}
+
+int master(string cmd, string cmdargs[], int taskstdin, string taskargs[],
+    int &failedexit)
+{
+    int     errs = 0;
+    jobs_t  jobs = {};
+    int     tasknum;
+
+    for (tasknum = 0; ; tasknum++) {
+        string  taskarg;
+        string  argv[];
+        job_t   newjob;
+        int     pid;
+
+        if (taskstdin) {
+            taskarg = <stdin>;
+        } else {
+            taskarg = shift(&taskargs);
+        }
+        unless (defined(taskarg)) {
+            break;
+        }
+
+        argv = build_argv(cmd, cmdargs, tasknum, taskarg);
+
+        if (options.dryrun) {
+            dryrun(tasknum, argv);
+            continue;
+        }
+
+        newjob.tasknum = tasknum;
+        newjob.showcmd = join(" ", argv);
+        newjob.outfile = make_temp("${PROG}.${newjob.tasknum}.out");
+        newjob.errfile = make_temp("${PROG}.${newjob.tasknum}.err");
+
+        if (options.verbose) {
+            warn("%s[%d]: start\t%s\n", PROG, newjob.tasknum, newjob.showcmd);
+        }
+
+        pid = spawn(argv, "/dev/null", newjob.outfile, newjob.errfile);
+
+        unless (defined(pid)) {
+            warn("%s[%d]: error\t%s\n", PROG, newjob.tasknum, newjob.showcmd);
+            fclose(newjob.outfile);
+            fclose(newjob.errfile);
+            errs++;
+            continue;
+        }
+
+        jobs{pid} = newjob;
+
+        if (length(jobs) >= options.maxjobs) {
+            errs += wait_jobs(&jobs, 0, &failedexit);
+        }
+
+        if (errs > 0 && !options.keepgoing) {
+            break;
+        }
+    }
+
+    errs += wait_jobs(&jobs, 1, &failedexit);
+    return errs;
+}
+
+string[] build_argv(string cmd, string cmdargs[], int tasknum, string task)
+{
+    string  argv[];
+    string  arg;
+    int     havetask = 0;
+
+    if (defined(options.shell)) {
+        argv = {options.shell, "-c", cmd, "-"};
+    } else {
+        argv = {cmd};
+    }
+    foreach (arg in cmdargs) {
+        string  substarg = subst(arg, tasknum, task);
+        push(&argv, substarg);
+        havetask = havetask || (arg != substarg);
+    }
+    if (!havetask) {
+        push(&argv, task);
+    }
+    return argv;
+}
+
+string subst(string s, int tasknum, string task)
+{
+    string{string}  mapping = {
+        "{}"    =>  task,
+        "{.}"   =>  remove_extension(task),
+        "{/}"   =>  basename(task),
+        "{//}"  =>  dirname(task),
+        "{/.}"  =>  remove_extension(basename(task)),
+        "{#}"   =>  (string)tasknum
+    };
+    return String_map(mapping, s);
+}
+
+string extension(string fn)
+{
+    return File_extension(fn);
+}
+
+string remove_extension(string fn)
+{
+    int n = length(fn) - length(extension(fn));
+    return fn[0..n-1];
+}
+
+void dryrun(int tasknum, string argv[])
+{
+    string  arg;
+
+    printf("task #%d\n", tasknum);
+    foreach (arg in argv) {
+        printf("\t%s\n", arg);
+    }
+}
+
+int wait_jobs(jobs_t &jobs, int waitall, int &failedexit)
+{
+    int errs = 0;
+
+    while (length(jobs) > 0) {
+        int     pid;
+        STATUS  status;
+        job_t   job;
+
+        pid = wait(&status);
+        if (pid == -1) {
+            break; /* no more children */
+        }
+
+        job = jobs{pid};
+        unless (defined(job)) {
+            warn("%s: unknown child pid %d\n", PROG, pid);
+            continue;
+        }
+
+        undef(jobs{pid});
+
+        show_output(stderr, job.errfile, job, options.verbose);
+        show_output(stdout, job.outfile, job, 0);
+        fclose(job.errfile);
+        fclose(job.outfile);
+
+        if (status.exit == 0) {
+            if (options.verbose) {
+                warn("%s[%d]: done\t%s\n", PROG, job.tasknum, job.showcmd);
+            }
+        } else if (status.exit) {
+            if (options.verbose) {
+                warn("%s[%d]: exit %d\t%s\n", PROG, job.tasknum, status.exit,
+                    job.showcmd);
+            }
+            failedexit = status.exit;
+        } else if (status.signal) {
+            if (options.verbose) {
+                warn("%s[%d]: signal %d\t%s\n", PROG, job.tasknum,
+                    status.signal, job.showcmd);
+            }
+            failedexit = 128 + status.signal;
+        }
+
+        if (status.exit != 0) {
+            errs++;
+        }
+
+        if (!waitall) {
+            break;
+        }
+    }
+
+    return errs;
+}
+
+FILE make_temp(string template)
+{
+    string  fn;
+    FILE    f;
+
+    f = File_tempfile(&fn, template);
+    unlink(fn);
+    return f;
+}
+
+void show_output(FILE out, FILE in, job_t job, int sep)
+{
+    int     pos;
+    string  s;
+
+    pos = tell(in);
+    if (pos == 0)
+        return;
+    seek(in, 0);
+    if (sep) {
+        fprintf(out, "-------- %s[%d]: %s --------\n",
+            PROG, job.tasknum, job.showcmd);
+    }
+    while (s = <in>) {
+        fprintf(out, "%s\n", s);
+    }
+    if (sep) {
+        fprintf(out, "--------\n");
+    }
+}
