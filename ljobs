@@ -6,7 +6,7 @@ typedef int pid_t;
 
 typedef struct job {
     int     tasknum;
-    string  showcmd;    /* only for show */
+    string  quotedcmd;
     FILE    outfile;
     FILE    errfile;
 } job_t;
@@ -155,6 +155,7 @@ int master(string cmd, string cmdargs[], int taskstdin, string taskargs[],
     for (tasknum = 0; ; tasknum++) {
         string  taskarg;
         string  argv[];
+        string  quotedcmd;
         job_t   newjob;
         int     pid;
 
@@ -168,25 +169,31 @@ int master(string cmd, string cmdargs[], int taskstdin, string taskargs[],
         }
 
         argv = build_argv(cmd, cmdargs, tasknum, taskarg);
+        quotedcmd = join(" ", quote_args(argv));
 
         if (options.dryrun) {
-            dryrun(tasknum, argv);
+            dryrun(tasknum, quotedcmd);
             continue;
         }
 
         newjob.tasknum = tasknum;
-        newjob.showcmd = join(" ", argv);
+        newjob.quotedcmd = quotedcmd;
         newjob.outfile = make_temp("${PROG}.${newjob.tasknum}.out");
         newjob.errfile = make_temp("${PROG}.${newjob.tasknum}.err");
 
         if (options.verbose) {
-            warn("%s[%d]: start\t%s\n", PROG, newjob.tasknum, newjob.showcmd);
+            warn("%s[%d]: start\t%s\n", PROG, newjob.tasknum, newjob.quotedcmd);
         }
 
-        pid = spawn(argv, "/dev/null", newjob.outfile, newjob.errfile);
+        /*
+         * Unfortunately spawn exposes tcl exec behaviour of interpreting
+         * special sequences in arguments so we have to find a way around it.
+         */
+        pid = spawn({"/bin/sh", "-c", quotedcmd}, "/dev/null",
+            newjob.outfile, newjob.errfile);
 
         unless (defined(pid)) {
-            warn("%s[%d]: error\t%s\n", PROG, newjob.tasknum, newjob.showcmd);
+            warn("%s[%d]: error\t%s\n", PROG, newjob.tasknum, newjob.quotedcmd);
             fclose(newjob.outfile);
             fclose(newjob.errfile);
             errs++;
@@ -254,14 +261,9 @@ string remove_extension(string fn)
     return fn[0..n-1];
 }
 
-void dryrun(int tasknum, string argv[])
+void dryrun(int tasknum, string quotedcmd)
 {
-    string  arg;
-
-    printf("task #%d\n", tasknum);
-    foreach (arg in argv) {
-        printf("\t%s\n", arg);
-    }
+    printf("[%d]\t%s\n", tasknum, quotedcmd);
 }
 
 int wait_jobs(jobs_t &jobs, int waitall, int &failedexit)
@@ -293,18 +295,18 @@ int wait_jobs(jobs_t &jobs, int waitall, int &failedexit)
 
         if (status.exit == 0) {
             if (options.verbose) {
-                warn("%s[%d]: done\t%s\n", PROG, job.tasknum, job.showcmd);
+                warn("%s[%d]: done\t%s\n", PROG, job.tasknum, job.quotedcmd);
             }
         } else if (status.exit) {
             if (options.verbose) {
                 warn("%s[%d]: exit %d\t%s\n", PROG, job.tasknum, status.exit,
-                    job.showcmd);
+                    job.quotedcmd);
             }
             failedexit = status.exit;
         } else if (status.signal) {
             if (options.verbose) {
                 warn("%s[%d]: signal %d\t%s\n", PROG, job.tasknum,
-                    status.signal, job.showcmd);
+                    status.signal, job.quotedcmd);
             }
             failedexit = 128 + status.signal;
         }
@@ -342,12 +344,36 @@ void show_output(FILE out, FILE in, job_t job, int sep)
     seek(in, 0);
     if (sep) {
         fprintf(out, "-------- %s[%d]: %s --------\n",
-            PROG, job.tasknum, job.showcmd);
+            PROG, job.tasknum, job.quotedcmd);
     }
     while (s = <in>) {
         fprintf(out, "%s\n", s);
     }
     if (sep) {
         fprintf(out, "--------\n");
+    }
+}
+
+string[] quote_args(string xs[])
+{
+    string  qs[] = {};
+    string  s;
+
+    foreach (s in xs) {
+        push(&qs, quote_arg(s));
+    }
+    return qs;
+}
+
+string quote_arg(string s)
+{
+    switch (s) {
+        case "":
+            return "''";
+        case m|^[A-Za-z0-9_%+,-./:=@]*$|:
+            return s;
+        default:
+            s =~ s/'/'"'"'/g;
+            return "'${s}'";
     }
 }

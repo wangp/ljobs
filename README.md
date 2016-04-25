@@ -30,9 +30,6 @@ These strings are replaced in command arguments:
 If none of the strings occur in a command argument then the task is
 appended as the last argument of the command, i.e. `{}` is implied.
 
-The command is executed *without* invoking a shell unless the `-c`
-option is used.
-
 Options
 -------
 
@@ -102,9 +99,6 @@ Bugs
 ----
 
   * Does not catch signals. This seems to require a Tcl extension.
-
-  * Command arguments cannot begin with "|". This appears to be a
-    bug in the implementation of L's `spawn` function.
 
 Author
 ------
