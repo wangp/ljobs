@@ -54,7 +54,7 @@ These are the options to ljobs itself.
 
     Enable verbose output.
 
-  * `--dry-run`
+  * `-n`, `--dry-run`
 
     Print commands to be executed but do not run them.
 

@@ -27,7 +27,7 @@ int process_options(string argv[])
     string  lopts[] = {"help", "jobs:", "keep-going", "verbose", "dry-run"};
     int     n;
 
-    while (c = getopt(argv, "hj:kcv", lopts)) {
+    while (c = getopt(argv, "hj:kcvn", lopts)) {
         switch (c) {
             case "h":
             case "help":
@@ -56,6 +56,7 @@ int process_options(string argv[])
             case "verbose":
                 options.verbose = 1;
                 break;
+            case "n":
             case "dry-run":
                 options.dryrun = 1;
                 break;
@@ -89,7 +90,7 @@ void usage()
         "  -k           keep going even if a task failed\n"
         "  -c           run shell command\n"
         "  -v           verbose output\n"
-        "  --dry-run    print commands but do not run them\n"
+        "  -n           print commands but do not run them\n"
         "\n"
         "String substitutions in command arguments:\n"
         "  {}           task\n"

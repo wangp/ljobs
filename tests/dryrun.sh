@@ -1,1 +1,1 @@
-exec ../ljobs -j1 --dry-run x {} y ::: a 'b c'
+exec ../ljobs -j1 -n --dry-run x {} y ::: a 'b c'
