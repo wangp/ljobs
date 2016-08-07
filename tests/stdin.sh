@@ -1,1 +1,1 @@
-exec ../ljobs -j1 echo < stdin.inp
+exec ./testbin -j1 echo < stdin.inp

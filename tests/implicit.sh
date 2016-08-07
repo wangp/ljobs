@@ -1,1 +1,1 @@
-exec ../ljobs -j1 echo ::: a 'b c'
+exec ./testbin -j1 echo ::: a 'b c'
