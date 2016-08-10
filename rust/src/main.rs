@@ -2,14 +2,10 @@
 ** ljobs - A tool to execute commands in parallel.
 */
 
-#[macro_use] extern crate lazy_static;
 extern crate getopts;
 extern crate num_cpus;
-extern crate regex;
 
 use getopts::Options as Getopt;
-use regex::Regex;
-use std::borrow::Cow::{self, Borrowed, Owned};
 use std::cmp::min;
 use std::env;
 use std::fmt;
@@ -316,6 +312,61 @@ fn build_argv(opts: &Options,
 }
 
 fn subst(s: &str, tasknum: usize, task: &str) -> String {
+    let mut acc = String::new();
+    let mut ss = s;
+
+    while ss.len() > 0 {
+        if let Some(open) = ss.find('{') {
+            if let Some(close0) = ss[open..].find('}') {
+                acc.push_str(&ss[..open]);
+                let close = open + close0;
+                let mid = &ss[open+1..close];
+                let next;
+                match mid {
+                    "" => {
+                        acc.push_str(task);
+                        next = close+1;
+                    },
+                    "." => {
+                        acc.push_str(remove_extension(task));
+                        next = close+1;
+                    },
+                    "/" => {
+                        acc.push_str(basename(task));
+                        next = close+1;
+                    },
+                    "//" => {
+                        acc.push_str(dirname(task));
+                        next = close+1;
+                    },
+                    "/." => {
+                        acc.push_str(remove_extension(basename(task)));
+                        next = close+1;
+                    },
+                    "#" => {
+                        acc.push_str(&tasknum.to_string());
+                        next = close+1;
+                    },
+                    _ => {
+                        acc.push_str("{");
+                        next = open+1;
+                    }
+                }
+                ss = &ss[next..];
+            } else {
+                break;
+            }
+        } else {
+            break;
+        }
+    }
+
+    acc.push_str(ss);
+    return acc;
+}
+
+/*
+fn subst(s: &str, tasknum: usize, task: &str) -> String {
 
     // Using regex as Rust standard library does not provide a simple way to
     // perform multiple string replacement. It could be written more directly.
@@ -354,6 +405,7 @@ impl<'a> regex::Replacer for Subster<'a> {
         None
     }
 }
+*/
 
 // std::path is too subtle...
 

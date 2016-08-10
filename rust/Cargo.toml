@@ -5,6 +5,4 @@ authors = ["tjaden"]
 
 [dependencies]
 getopts = "0.2"
-regex = "0.1"
-lazy_static = "0.2.1"
 num_cpus = "1.0"
