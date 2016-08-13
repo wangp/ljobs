@@ -22,7 +22,7 @@ const PROG: &'static str = "ljobs";
 struct Options {
     maxjobs:    usize,
     keepgoing:  bool,
-    shell:      String,
+    shell:      Option<String>,
     verbose:    bool,
     dryrun:     bool
 }
@@ -79,16 +79,13 @@ fn process_options(argv: &Vec<String>) -> (Options, Vec<String>) {
     let mut opts = Options {
         maxjobs:    0,
         keepgoing:  false,
-        shell:      String::from(""),
+        shell:      None,
         verbose:    false,
         dryrun:     false
     };
 
     if let Some(s) = matches.opt_str("j") {
-        match s.parse() {
-            Ok(n) => opts.maxjobs = n,
-            Err(_) => opts.maxjobs = 0
-        };
+        opts.maxjobs = s.parse().unwrap_or(0);
         if opts.maxjobs < 1 {
             die!("invalid argument for --jobs\n");
         }
@@ -102,9 +99,9 @@ fn process_options(argv: &Vec<String>) -> (Options, Vec<String>) {
     if matches.opt_present("c") {
         match env::var("SHELL") {
             Ok(val) =>
-                opts.shell = val,
+                opts.shell = Some(val),
             Err(env::VarError::NotPresent) =>
-                opts.shell = String::from("/bin/sh"),
+                opts.shell = Some(String::from("/bin/sh")),
             Err(env::VarError::NotUnicode(_)) =>
                 die!("SHELL value not Unicode\n")
         }
@@ -156,17 +153,19 @@ fn main() {
     }
     let cmd = &freeargs[0];
 
-    let mut cmdargs = &freeargs[1..];
-    let mut taskargs: &[String] = &[];
-    let mut taskstdin = true;
-    for i in 1..freeargs.len() {
-        if freeargs[i] == ":::" {
+    let (cmdargs, taskargs, taskstdin);
+    match freeargs.iter().position(|x| x == ":::") {
+        Some(i) => {
             cmdargs = &freeargs[1..i];
             taskargs = &freeargs[i+1..];
             taskstdin = false;
-            break;
+        },
+        None => {
+            cmdargs = &freeargs[1..];
+            taskargs = &[];
+            taskstdin = true;
         }
-    }
+    };
 
     let (errs, failedexit) = master(&opts, cmd, cmdargs, taskstdin, taskargs);
 
@@ -198,13 +197,13 @@ fn master(opts: &Options,
     // through a channel.
     let (tx, mut rx) = mpsc::channel();
 
-    loop {
+    'main: loop {
         let taskarg: String;
         if taskstdin {
             let mut line = String::new();
             match io::stdin().read_line(&mut line) {
                 Ok(0) => // eof
-                    break,
+                    break 'main,
                 Ok(_) => {
                     chomp(&mut line);
                     taskarg = line;
@@ -215,7 +214,7 @@ fn master(opts: &Options,
             }
         } else {
             if tasknum >= taskargs.len() {
-                break;
+                break 'main;
             }
             taskarg = taskargs[tasknum].clone();
         }
@@ -289,14 +288,17 @@ fn build_argv(opts: &Options,
     let mut argv: Vec<String> = Vec::new();
     let mut havetask = false;
 
-    if opts.shell != "" {
-        argv.push(opts.shell.clone());
-        argv.push(String::from("-c"));
-        argv.push(cmd.clone());
-        argv.push(String::from("-"));
-    } else {
-        argv.push(cmd.clone());
-    }
+    match opts.shell {
+        Some(ref shell) => {
+            argv.push(shell.clone());
+            argv.push(String::from("-c"));
+            argv.push(cmd.clone());
+            argv.push(String::from("-"));
+        },
+        None => {
+            argv.push(cmd.clone());
+        }
+    };
 
     for arg in cmdargs {
         let substarg = subst(arg, tasknum, task);
