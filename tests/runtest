@@ -1,0 +1,41 @@
+#!/bin/sh -eu
+
+SHELL=${SHELL:-/bin/sh}
+DIFF=${DIFF:-diff -u}
+
+testscript=$1
+base=$(basename "$testscript" .sh)
+out="$base.out"
+exp="$base.exp"
+exp2="$base.exp2"
+err="$base.err"
+err_exp="$base.err_exp"
+status=0
+
+test -f "$testscript" || exit 2
+
+$SHELL "$testscript" >"$out" 2>"$err"
+
+if diff1=$( $DIFF "$exp" "$out" )
+then
+    :
+else
+    if test -f "$exp2"
+    then
+        $DIFF "$exp2" "$out" || status=1
+    else
+        echo "$diff1"
+        status=1
+    fi
+fi
+
+if test -f "$err_exp"
+then
+    $DIFF "$err_exp" "$err" || status=1
+else
+    $DIFF /dev/null "$err" || status=1
+fi
+
+rm -f "$out" "$err"
+
+exit $status
