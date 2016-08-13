@@ -4,6 +4,7 @@ ljobs
 A tool to execute commands in parallel (something like GNU parallel).
 
 Written to try out the [Little language](http://www.little-lang.org/).
+And also Rust.
 
 Usage
 -----
