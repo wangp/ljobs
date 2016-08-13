@@ -220,22 +220,30 @@ string[] build_argv(string cmd, string cmdargs[], int tasknum, string task)
 {
     string  argv[];
     string  arg;
-    int     havetask = 0;
 
     if (defined(options.shell)) {
         argv = {options.shell, "-c", cmd, "-"};
     } else {
         argv = {cmd};
     }
-    foreach (arg in cmdargs) {
-        string  substarg = subst(arg, tasknum, task);
-        push(&argv, substarg);
-        havetask = havetask || (arg != substarg);
-    }
-    if (!havetask) {
+    if (have_pattern(cmdargs)) {
+        foreach (arg in cmdargs) {
+            push(&argv, subst(arg, tasknum, task));
+        }
+    } else {
         push(&argv, task);
     }
     return argv;
+}
+
+int have_pattern(string cmdargs[])
+{
+    string  arg;
+    foreach (arg in cmdargs) {
+        if (arg =~ m_{}|{[.]}|{/}|{//}|{/[.]}|{#}_)
+            return 1;
+    }
+    return 0;
 }
 
 string subst(string s, int tasknum, string task)

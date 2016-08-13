@@ -301,9 +301,15 @@ fn build_argv(opts: &Options,
     };
 
     for arg in cmdargs {
-        let substarg = subst(arg, tasknum, task);
-        havetask = havetask || substarg.ne(arg);
-        argv.push(substarg);
+        match subst(arg, tasknum, task) {
+            Some(substarg) => {
+                argv.push(substarg);
+                havetask = true;
+            },
+            None => {
+                argv.push(arg.clone());
+            }
+        }
     }
 
     if !havetask {
@@ -313,9 +319,10 @@ fn build_argv(opts: &Options,
     return argv;
 }
 
-fn subst(s: &str, tasknum: usize, task: &str) -> String {
+fn subst(s: &str, tasknum: usize, task: &str) -> Option<String> {
     let mut acc = String::new();
     let mut ss = s;
+    let mut found = false;
 
     while ss.len() > 0 {
         if let Some(open) = ss.find('{') {
@@ -328,26 +335,32 @@ fn subst(s: &str, tasknum: usize, task: &str) -> String {
                     "" => {
                         acc.push_str(task);
                         next = close+1;
+                        found = true;
                     },
                     "." => {
                         acc.push_str(remove_extension(task));
                         next = close+1;
+                        found = true;
                     },
                     "/" => {
                         acc.push_str(basename(task));
                         next = close+1;
+                        found = true;
                     },
                     "//" => {
                         acc.push_str(dirname(task));
                         next = close+1;
+                        found = true;
                     },
                     "/." => {
                         acc.push_str(remove_extension(basename(task)));
                         next = close+1;
+                        found = true;
                     },
                     "#" => {
                         acc.push_str(&tasknum.to_string());
                         next = close+1;
+                        found = true;
                     },
                     _ => {
                         acc.push_str("{");
@@ -364,7 +377,12 @@ fn subst(s: &str, tasknum: usize, task: &str) -> String {
     }
 
     acc.push_str(ss);
-    return acc;
+
+    if found {
+        Some(acc)
+    } else {
+        None
+    }
 }
 
 /*
